@@ -20,6 +20,9 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "Zlib",
+    # Permissive data license used by the Mozilla root certificate data
+    # (webpki-roots, pulled in by ureq/rustls).
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]
