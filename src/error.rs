@@ -40,6 +40,13 @@ pub enum Error {
     /// A response body could not be decoded.
     #[error("failed to decode response: {0}")]
     Decode(String),
+
+    /// A destructive operation was refused because it was not confirmed.
+    #[error("refusing to {action}: confirmation required (pass --yes to skip the prompt)")]
+    ConfirmationRequired {
+        /// Human-readable description of the refused operation.
+        action: String,
+    },
 }
 
 /// Convenience result alias used throughout the crate.
