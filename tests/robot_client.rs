@@ -6,9 +6,12 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::time::Duration;
 
 use metalctl::api;
-use metalctl::{Credentials, Error, HttpRequest, HttpResponse, RobotClient, Transport};
+use metalctl::{
+    Credentials, Error, HttpRequest, HttpResponse, RetryPolicy, RobotClient, Transport,
+};
 
 #[derive(Clone, Default)]
 struct MockTransport {
@@ -17,14 +20,18 @@ struct MockTransport {
 
 #[derive(Default)]
 struct State {
-    responses: VecDeque<HttpResponse>,
+    responses: VecDeque<metalctl::Result<HttpResponse>>,
     requests: Vec<(HttpRequest, String)>,
 }
 
 impl MockTransport {
     fn with_responses(responses: Vec<HttpResponse>) -> Self {
+        Self::with_results(responses.into_iter().map(Ok).collect())
+    }
+
+    fn with_results(results: Vec<metalctl::Result<HttpResponse>>) -> Self {
         let transport = Self::default();
-        transport.state.borrow_mut().responses = responses.into();
+        transport.state.borrow_mut().responses = results.into();
         transport
     }
 
@@ -46,7 +53,7 @@ impl Transport for MockTransport {
         state
             .responses
             .pop_front()
-            .ok_or_else(|| Error::Transport("no mock response queued".to_owned()))
+            .unwrap_or_else(|| Err(Error::Transport("no mock response queued".to_owned())))
     }
 }
 
@@ -55,6 +62,22 @@ fn client_with(responses: Vec<HttpResponse>) -> (RobotClient<MockTransport>, Moc
     let credentials = Credentials::new("user", "pass").unwrap();
     let client =
         RobotClient::with_transport("https://robot.example", credentials, transport.clone());
+    (client, transport)
+}
+
+fn client_with_results(
+    results: Vec<metalctl::Result<HttpResponse>>,
+) -> (RobotClient<MockTransport>, MockTransport) {
+    let transport = MockTransport::with_results(results);
+    let credentials = Credentials::new("user", "pass").unwrap();
+    let retry = RetryPolicy {
+        max_attempts: 3,
+        base_delay: Duration::from_millis(1),
+        max_delay: Duration::from_millis(2),
+    };
+    let client =
+        RobotClient::with_transport("https://robot.example", credentials, transport.clone())
+            .with_retry_policy(retry);
     (client, transport)
 }
 
@@ -407,4 +430,70 @@ fn cancels_vswitch() {
     assert_eq!(request.method, "DELETE");
     assert_eq!(request.url, "https://robot.example/vswitch/50301");
     assert_eq!(request.body.as_deref(), Some("cancellation_date=now"));
+}
+
+#[test]
+fn retries_a_get_after_a_transport_error() {
+    let (client, transport) = client_with_results(vec![
+        Err(Error::Transport("connection reset".to_owned())),
+        Ok(HttpResponse {
+            status: 200,
+            body: "[]".to_owned(),
+        }),
+    ]);
+
+    assert!(api::server::list(&client).is_ok());
+    assert_eq!(transport.requests().len(), 2);
+}
+
+#[test]
+fn stops_retrying_a_get_after_max_attempts() {
+    let (client, transport) = client_with_results(vec![
+        Err(Error::Transport("a".to_owned())),
+        Err(Error::Transport("b".to_owned())),
+        Err(Error::Transport("c".to_owned())),
+    ]);
+
+    let error = api::server::list(&client).unwrap_err();
+    assert!(matches!(error, Error::Transport(_)));
+    assert_eq!(transport.requests().len(), 3);
+}
+
+#[test]
+fn does_not_retry_a_post_transport_error() {
+    // A POST may have been applied even when the response is lost, so it must
+    // not be retried automatically.
+    let (client, transport) = client_with_results(vec![Err(Error::Transport("reset".to_owned()))]);
+
+    let error = api::vswitch::cancel(&client, 50301).unwrap_err();
+    assert!(matches!(error, Error::Transport(_)));
+    assert_eq!(transport.requests().len(), 1);
+}
+
+#[test]
+fn maps_429_to_rate_limited() {
+    let (client, _transport) = client_with(vec![HttpResponse {
+        status: 429,
+        body: r#"{"error":{"status":429,"code":"RATE_LIMIT","message":"too many requests"}}"#
+            .to_owned(),
+    }]);
+
+    match api::server::list(&client).unwrap_err() {
+        Error::RateLimited { message } => assert_eq!(message, "too many requests"),
+        other => panic!("expected Error::RateLimited, got {other}"),
+    }
+}
+
+#[test]
+fn retry_policy_delay_is_exponential_and_capped() {
+    let policy = RetryPolicy {
+        max_attempts: 10,
+        base_delay: Duration::from_millis(100),
+        max_delay: Duration::from_millis(500),
+    };
+    assert_eq!(policy.delay(1), Duration::from_millis(100));
+    assert_eq!(policy.delay(2), Duration::from_millis(200));
+    assert_eq!(policy.delay(3), Duration::from_millis(400));
+    assert_eq!(policy.delay(4), Duration::from_millis(500));
+    assert_eq!(policy.delay(100), Duration::from_millis(500));
 }

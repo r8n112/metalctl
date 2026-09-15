@@ -25,7 +25,7 @@ mod credentials;
 mod error;
 mod transport;
 
-pub use client::{RobotClient, DEFAULT_BASE_URL};
+pub use client::{RetryPolicy, RobotClient, DEFAULT_BASE_URL};
 pub use credentials::Credentials;
 pub use error::{Error, Result};
-pub use transport::{HttpRequest, HttpResponse, Transport, UreqTransport};
+pub use transport::{HttpRequest, HttpResponse, Transport, UreqTransport, DEFAULT_TIMEOUT};

@@ -1,5 +1,7 @@
 //! The Robot API client.
 
+use std::time::Duration;
+
 use serde::de::DeserializeOwned;
 
 use crate::credentials::Credentials;
@@ -9,6 +11,42 @@ use crate::transport::{HttpRequest, HttpResponse, Transport, UreqTransport};
 /// Default Robot API base URL.
 pub const DEFAULT_BASE_URL: &str = "https://robot-ws.your-server.de";
 
+/// Bounded retry policy for idempotent requests.
+///
+/// Only `GET` requests are retried on transport errors. A `POST`/`DELETE` may
+/// have been applied even when the response is lost, so retrying it could
+/// double-apply a reset, cancellation, or route change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    /// Total attempts, including the first. `1` disables retries.
+    pub max_attempts: u32,
+    /// Delay before the first retry.
+    pub base_delay: Duration,
+    /// Upper bound for the exponentially growing delay.
+    pub max_delay: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(200),
+            max_delay: Duration::from_secs(2),
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// Delay before retry `attempt` (1-based): `base * 2^(attempt-1)`, capped.
+    #[must_use]
+    pub fn delay(&self, attempt: u32) -> Duration {
+        let factor = 1u32
+            .checked_shl(attempt.saturating_sub(1))
+            .unwrap_or(u32::MAX);
+        self.base_delay.saturating_mul(factor).min(self.max_delay)
+    }
+}
+
 /// Typed client for the Hetzner Robot API.
 ///
 /// The generic parameter is the [`Transport`] used to perform requests, which
@@ -17,6 +55,7 @@ pub struct RobotClient<T = UreqTransport> {
     base_url: String,
     credentials: Credentials,
     transport: T,
+    retry: RetryPolicy,
 }
 
 impl RobotClient<UreqTransport> {
@@ -43,13 +82,27 @@ impl<T: Transport> RobotClient<T> {
             base_url,
             credentials,
             transport,
+            retry: RetryPolicy::default(),
         }
+    }
+
+    /// Overrides the retry policy.
+    #[must_use]
+    pub fn with_retry_policy(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
     }
 
     /// Returns the configured base URL.
     #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Returns the configured retry policy.
+    #[must_use]
+    pub fn retry_policy(&self) -> RetryPolicy {
+        self.retry
     }
 
     /// Performs a `GET` request and deserialises the JSON body.
@@ -120,17 +173,40 @@ impl<T: Transport> RobotClient<T> {
             url,
             body,
         };
-        let response = self
-            .transport
-            .execute(&request, &self.credentials.authorization())?;
-        if !(200..300).contains(&response.status) {
-            return Err(Error::Api {
-                status: response.status,
-                message: extract_error_message(&response.body),
-            });
+        let authorization = self.credentials.authorization();
+        let idempotent = method == "GET";
+
+        let mut attempt = 1;
+        loop {
+            match self.transport.execute(&request, &authorization) {
+                Ok(response) => return check_status(response),
+                Err(Error::Transport(message)) => {
+                    if idempotent && attempt < self.retry.max_attempts {
+                        std::thread::sleep(self.retry.delay(attempt));
+                        attempt += 1;
+                        continue;
+                    }
+                    return Err(Error::Transport(message));
+                }
+                Err(other) => return Err(other),
+            }
         }
-        Ok(response)
     }
+}
+
+fn check_status(response: HttpResponse) -> Result<HttpResponse> {
+    if response.status == 429 {
+        return Err(Error::RateLimited {
+            message: extract_error_message(&response.body),
+        });
+    }
+    if !(200..300).contains(&response.status) {
+        return Err(Error::Api {
+            status: response.status,
+            message: extract_error_message(&response.body),
+        });
+    }
+    Ok(response)
 }
 
 fn deserialize<V: DeserializeOwned>(body: &str) -> Result<V> {

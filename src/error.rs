@@ -27,6 +27,16 @@ pub enum Error {
         message: String,
     },
 
+    /// The Robot API rate limit was exceeded (HTTP 429).
+    ///
+    /// The client does not retry rate limits automatically; callers should back
+    /// off and try again later.
+    #[error("robot API rate limit exceeded: {message}")]
+    RateLimited {
+        /// Human-readable message extracted from the error body.
+        message: String,
+    },
+
     /// A response body could not be decoded.
     #[error("failed to decode response: {0}")]
     Decode(String),

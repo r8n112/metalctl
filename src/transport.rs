@@ -3,7 +3,12 @@
 //! The [`Transport`] trait keeps the client testable: production uses
 //! [`UreqTransport`], tests inject a mock and never touch the network.
 
+use std::time::Duration;
+
 use crate::error::{Error, Result};
+
+/// Default per-request timeout used by [`UreqTransport::new`].
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A minimal HTTP request, independent of any HTTP library.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,18 +43,38 @@ pub trait Transport {
 }
 
 /// Blocking HTTP transport backed by [`ureq`].
+///
+/// Requests have a bounded timeout, so a hung server cannot block a caller (or
+/// an MCP worker thread) forever. Use [`with_timeout`](Self::with_timeout) or
+/// [`with_timeouts`](Self::with_timeouts) to change the defaults.
 #[derive(Debug)]
 pub struct UreqTransport {
     agent: ureq::Agent,
 }
 
 impl UreqTransport {
-    /// Creates a transport with a default agent.
+    /// Creates a transport using [`DEFAULT_TIMEOUT`].
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            agent: ureq::AgentBuilder::new().build(),
-        }
+        Self::with_timeout(DEFAULT_TIMEOUT)
+    }
+
+    /// Creates a transport with the same connect and overall timeout.
+    #[must_use]
+    pub fn with_timeout(timeout: Duration) -> Self {
+        Self::with_timeouts(timeout, timeout)
+    }
+
+    /// Creates a transport with separate connect and overall timeouts.
+    #[must_use]
+    pub fn with_timeouts(connect: Duration, overall: Duration) -> Self {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(connect)
+            .timeout_read(overall)
+            .timeout_write(overall)
+            .timeout(overall)
+            .build();
+        Self { agent }
     }
 }
 
