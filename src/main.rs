@@ -1,0 +1,113 @@
+//! `metalctl` command-line interface.
+
+use clap::{Parser, Subcommand};
+use metalctl::{api, Credentials, Error, Result, RobotClient};
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "metalctl",
+    version,
+    about = "Low-level CLI for the Hetzner Robot API"
+)]
+struct Cli {
+    /// Print raw JSON instead of a human-readable table.
+    #[arg(long, global = true)]
+    json: bool,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Work with dedicated servers.
+    Server {
+        #[command(subcommand)]
+        command: ServerCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ServerCommand {
+    /// List all servers on the account.
+    List,
+    /// Show a single server by its server number.
+    Get {
+        /// Server number.
+        number: u32,
+    },
+}
+
+fn main() -> std::process::ExitCode {
+    let cli = Cli::parse();
+    match run(&cli) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(cli: &Cli) -> Result<()> {
+    let client = RobotClient::new(Credentials::from_env()?);
+    match &cli.command {
+        Command::Server { command } => match command {
+            ServerCommand::List => {
+                let servers = api::server::list(&client)?;
+                if cli.json {
+                    print_json(&servers)?;
+                } else {
+                    print_server_table(&servers);
+                }
+            }
+            ServerCommand::Get { number } => {
+                let server = api::server::get(&client, *number)?;
+                if cli.json {
+                    print_json(&server)?;
+                } else {
+                    print_server(&server);
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
+fn print_server_table(servers: &[api::server::Server]) {
+    if servers.is_empty() {
+        println!("no servers");
+        return;
+    }
+    for server in servers {
+        println!(
+            "{:<8} {:<16} {}",
+            server.server_number, server.server_ip, server.server_name
+        );
+    }
+}
+
+fn print_server(server: &api::server::Server) {
+    println!("number:  {}", server.server_number);
+    println!("name:    {}", server.server_name);
+    println!("ip:      {}", server.server_ip);
+    if let Some(net) = &server.server_ipv6_net {
+        println!("ipv6:    {net}");
+    }
+    if let Some(product) = &server.product {
+        println!("product: {product}");
+    }
+    if let Some(status) = &server.status {
+        println!("status:  {status}");
+    }
+    if let Some(dc) = &server.dc {
+        println!("dc:      {dc}");
+    }
+}
+
+fn print_json<V: serde::Serialize>(value: &V) -> Result<()> {
+    let encoded =
+        serde_json::to_string_pretty(value).map_err(|error| Error::Decode(error.to_string()))?;
+    println!("{encoded}");
+    Ok(())
+}

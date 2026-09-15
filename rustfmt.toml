@@ -1,0 +1,9 @@
+edition = "2021"
+max_width = 100
+use_field_init_shorthand = true
+use_try_shorthand = true
+newline_style = "Unix"
+# Nightly-only (kept off for stable contributors):
+# imports_granularity = "Module"
+# group_imports = "StdExternalCrate"
+# wrap_comments = true
