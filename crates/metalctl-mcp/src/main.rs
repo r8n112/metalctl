@@ -295,13 +295,19 @@ struct TrafficQuery {
 impl Metalctl {
     // ----- read-only -------------------------------------------------------
 
-    #[tool(description = "List all dedicated servers on the Hetzner Robot account")]
+    #[tool(
+        description = "List all dedicated servers on the Hetzner Robot account",
+        annotations(read_only_hint = true)
+    )]
     async fn server_list(&self) -> Result<CallToolResult, McpError> {
         let result = call(self.client.clone(), api::server::list).await?;
         report(result)
     }
 
-    #[tool(description = "Show a single dedicated server by its server number")]
+    #[tool(
+        description = "Show a single dedicated server by its server number",
+        annotations(read_only_hint = true)
+    )]
     async fn server_get(
         &self,
         Parameters(p): Parameters<ServerNumber>,
@@ -313,7 +319,10 @@ impl Metalctl {
         report(result)
     }
 
-    #[tool(description = "Show the reverse DNS PTR record for an IP address")]
+    #[tool(
+        description = "Show the reverse DNS PTR record for an IP address",
+        annotations(read_only_hint = true)
+    )]
     async fn rdns_get(
         &self,
         Parameters(p): Parameters<IpParam>,
@@ -322,7 +331,10 @@ impl Metalctl {
         report(result)
     }
 
-    #[tool(description = "List the reset methods available for a dedicated server")]
+    #[tool(
+        description = "List the reset methods available for a dedicated server",
+        annotations(read_only_hint = true)
+    )]
     async fn reset_methods(
         &self,
         Parameters(p): Parameters<ServerNumber>,
@@ -334,7 +346,10 @@ impl Metalctl {
         report(result)
     }
 
-    #[tool(description = "Show the current rescue system configuration for a server")]
+    #[tool(
+        description = "Show the current rescue system configuration for a server",
+        annotations(read_only_hint = true)
+    )]
     async fn boot_rescue_get(
         &self,
         Parameters(p): Parameters<ServerNumber>,
@@ -346,13 +361,19 @@ impl Metalctl {
         report(result)
     }
 
-    #[tool(description = "List all failover IPs on the Hetzner Robot account")]
+    #[tool(
+        description = "List all failover IPs on the Hetzner Robot account",
+        annotations(read_only_hint = true)
+    )]
     async fn failover_list(&self) -> Result<CallToolResult, McpError> {
         let result = call(self.client.clone(), api::failover::list).await?;
         report(result)
     }
 
-    #[tool(description = "Show a single failover IP and its current routing target")]
+    #[tool(
+        description = "Show a single failover IP and its current routing target",
+        annotations(read_only_hint = true)
+    )]
     async fn failover_get(
         &self,
         Parameters(p): Parameters<IpParam>,
@@ -362,7 +383,8 @@ impl Metalctl {
     }
 
     #[tool(
-        description = "Query traffic statistics for IPs or subnets over a day, month or year range"
+        description = "Query traffic statistics for IPs or subnets over a day, month or year range",
+        annotations(read_only_hint = true)
     )]
     async fn traffic_query(
         &self,
@@ -375,13 +397,19 @@ impl Metalctl {
         report(result)
     }
 
-    #[tool(description = "List all vSwitches on the Hetzner Robot account")]
+    #[tool(
+        description = "List all vSwitches on the Hetzner Robot account",
+        annotations(read_only_hint = true)
+    )]
     async fn vswitch_list(&self) -> Result<CallToolResult, McpError> {
         let result = call(self.client.clone(), api::vswitch::list).await?;
         report(result)
     }
 
-    #[tool(description = "Show a single vSwitch, including connected servers")]
+    #[tool(
+        description = "Show a single vSwitch, including connected servers",
+        annotations(read_only_hint = true)
+    )]
     async fn vswitch_get(
         &self,
         Parameters(p): Parameters<IdParam>,
@@ -393,7 +421,8 @@ impl Metalctl {
     // ----- destructive (require confirm=true) ------------------------------
 
     #[tool(
-        description = "Set the reverse DNS PTR record for an IP. Destructive: requires confirm=true."
+        description = "Set the reverse DNS PTR record for an IP. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
     )]
     async fn rdns_set(
         &self,
@@ -410,7 +439,8 @@ impl Metalctl {
     }
 
     #[tool(
-        description = "Reset (sw/hw/power) a dedicated server. Destructive: requires confirm=true."
+        description = "Reset (sw/hw/power) a dedicated server. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
     )]
     async fn reset_run(
         &self,
@@ -428,7 +458,8 @@ impl Metalctl {
     }
 
     #[tool(
-        description = "Activate the rescue system for a server. Destructive: requires confirm=true."
+        description = "Activate the rescue system for a server. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
     )]
     async fn boot_rescue_activate(
         &self,
@@ -445,7 +476,8 @@ impl Metalctl {
     }
 
     #[tool(
-        description = "Deactivate the rescue system for a server. Destructive: requires confirm=true."
+        description = "Deactivate the rescue system for a server. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
     )]
     async fn boot_rescue_deactivate(
         &self,
@@ -462,7 +494,8 @@ impl Metalctl {
     }
 
     #[tool(
-        description = "Route a failover IP to a target server IP. Destructive: requires confirm=true."
+        description = "Route a failover IP to a target server IP. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
     )]
     async fn failover_route(
         &self,
@@ -478,7 +511,10 @@ impl Metalctl {
         report(result)
     }
 
-    #[tool(description = "Create a vSwitch. Destructive: requires confirm=true.")]
+    #[tool(
+        description = "Create a vSwitch. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
+    )]
     async fn vswitch_create(
         &self,
         Parameters(p): Parameters<VSwitchCreate>,
@@ -493,7 +529,10 @@ impl Metalctl {
         report(result)
     }
 
-    #[tool(description = "Connect servers to a vSwitch. Destructive: requires confirm=true.")]
+    #[tool(
+        description = "Connect servers to a vSwitch. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
+    )]
     async fn vswitch_connect(
         &self,
         Parameters(p): Parameters<VSwitchServers>,
@@ -508,7 +547,10 @@ impl Metalctl {
         Ok(report_unit(result, "servers connected"))
     }
 
-    #[tool(description = "Disconnect servers from a vSwitch. Destructive: requires confirm=true.")]
+    #[tool(
+        description = "Disconnect servers from a vSwitch. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
+    )]
     async fn vswitch_disconnect(
         &self,
         Parameters(p): Parameters<VSwitchServers>,
@@ -523,7 +565,10 @@ impl Metalctl {
         Ok(report_unit(result, "servers disconnected"))
     }
 
-    #[tool(description = "Cancel a vSwitch immediately. Destructive: requires confirm=true.")]
+    #[tool(
+        description = "Cancel a vSwitch immediately. Destructive: requires confirm=true.",
+        annotations(destructive_hint = true)
+    )]
     async fn vswitch_cancel(
         &self,
         Parameters(p): Parameters<VSwitchCancel>,
@@ -628,42 +673,32 @@ mod tests {
     }
 
     #[test]
-    fn registers_all_tools() {
+    fn registers_all_tools_with_annotations() {
         let (server, _transport) = test_server();
-        let names: Vec<String> = server
-            .tool_router
-            .list_all()
-            .into_iter()
-            .map(|tool| tool.name.to_string())
-            .collect();
+        let tools = server.tool_router.list_all();
+        assert_eq!(tools.len(), 19);
 
-        for expected in [
+        let read_only = [
             "server_list",
             "server_get",
             "rdns_get",
-            "rdns_set",
             "reset_methods",
-            "reset_run",
             "boot_rescue_get",
-            "boot_rescue_activate",
-            "boot_rescue_deactivate",
             "failover_list",
             "failover_get",
-            "failover_route",
             "traffic_query",
             "vswitch_list",
             "vswitch_get",
-            "vswitch_create",
-            "vswitch_connect",
-            "vswitch_disconnect",
-            "vswitch_cancel",
-        ] {
-            assert!(
-                names.iter().any(|name| name == expected),
-                "missing tool {expected}"
-            );
+        ];
+
+        for tool in &tools {
+            let annotations = tool.annotations.as_ref().expect("tool annotations");
+            if read_only.contains(&tool.name.as_ref()) {
+                assert_eq!(annotations.read_only_hint, Some(true), "{}", tool.name);
+            } else {
+                assert_eq!(annotations.destructive_hint, Some(true), "{}", tool.name);
+            }
         }
-        assert_eq!(names.len(), 19);
     }
 
     #[derive(Clone, Default)]
