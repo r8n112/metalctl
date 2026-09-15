@@ -25,6 +25,11 @@ enum Command {
         #[command(subcommand)]
         command: ServerCommand,
     },
+    /// Work with reverse DNS entries.
+    Rdns {
+        #[command(subcommand)]
+        command: RdnsCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -35,6 +40,22 @@ enum ServerCommand {
     Get {
         /// Server number.
         number: u32,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RdnsCommand {
+    /// Show the reverse DNS entry for an IP address.
+    Get {
+        /// IP address.
+        ip: String,
+    },
+    /// Set the PTR record for an IP address.
+    Set {
+        /// IP address.
+        ip: String,
+        /// PTR record value.
+        ptr: String,
     },
 }
 
@@ -70,6 +91,24 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         },
+        Command::Rdns { command } => match command {
+            RdnsCommand::Get { ip } => {
+                let entry = api::rdns::get(&client, ip)?;
+                if cli.json {
+                    print_json(&entry)?;
+                } else {
+                    print_rdns(&entry);
+                }
+            }
+            RdnsCommand::Set { ip, ptr } => {
+                let entry = api::rdns::set(&client, ip, ptr)?;
+                if cli.json {
+                    print_json(&entry)?;
+                } else {
+                    print_rdns(&entry);
+                }
+            }
+        },
     }
     Ok(())
 }
@@ -102,6 +141,14 @@ fn print_server(server: &api::server::Server) {
     }
     if let Some(dc) = &server.dc {
         println!("dc:      {dc}");
+    }
+}
+
+fn print_rdns(entry: &api::rdns::Rdns) {
+    println!("ip:  {}", entry.ip);
+    match &entry.ptr {
+        Some(ptr) => println!("ptr: {ptr}"),
+        None => println!("ptr: (none)"),
     }
 }
 

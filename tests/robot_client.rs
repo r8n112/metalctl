@@ -131,3 +131,37 @@ fn normalises_a_trailing_slash_in_the_base_url() {
         "https://robot.example/server"
     );
 }
+
+#[test]
+fn gets_reverse_dns() {
+    let body = r#"{"rdns":{"ip":"192.0.2.1","ptr":"host.example.com"}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let entry = api::rdns::get(&client, "192.0.2.1").unwrap();
+    assert_eq!(entry.ip, "192.0.2.1");
+    assert_eq!(entry.ptr.as_deref(), Some("host.example.com"));
+    assert_eq!(
+        transport.requests()[0].0.url,
+        "https://robot.example/rdns/192.0.2.1"
+    );
+}
+
+#[test]
+fn sets_reverse_dns_with_form_body() {
+    let body = r#"{"rdns":{"ip":"192.0.2.1","ptr":"new.example.com"}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let entry = api::rdns::set(&client, "192.0.2.1", "new.example.com").unwrap();
+    assert_eq!(entry.ptr.as_deref(), Some("new.example.com"));
+
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.url, "https://robot.example/rdns/192.0.2.1");
+    assert_eq!(request.body.as_deref(), Some("ptr=new.example.com"));
+}
