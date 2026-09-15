@@ -45,6 +45,25 @@ enum Command {
         #[command(subcommand)]
         command: FailoverCommand,
     },
+    /// Query traffic statistics.
+    Traffic {
+        /// Range type: day, month or year.
+        #[arg(long, default_value = "month")]
+        kind: String,
+        /// Start of the range, for example 2026-09-01.
+        #[arg(long)]
+        from: String,
+        /// End of the range, for example 2026-09-30.
+        #[arg(long)]
+        to: String,
+        /// IP addresses or subnets to query.
+        ips: Vec<String>,
+    },
+    /// Manage vSwitches.
+    Vswitch {
+        #[command(subcommand)]
+        command: VSwitchCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -149,6 +168,46 @@ enum RescueCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum VSwitchCommand {
+    /// List all vSwitches.
+    List,
+    /// Show a single vSwitch, including connected servers.
+    Get {
+        /// vSwitch ID.
+        id: u32,
+    },
+    /// Create a vSwitch.
+    Create {
+        /// vSwitch name.
+        name: String,
+        /// VLAN ID (4000..=4091).
+        #[arg(long, default_value_t = 4000)]
+        vlan: u16,
+    },
+    /// Connect servers to a vSwitch.
+    Connect {
+        /// vSwitch ID.
+        id: u32,
+        /// Server numbers to connect.
+        #[arg(required = true)]
+        servers: Vec<u32>,
+    },
+    /// Disconnect servers from a vSwitch.
+    Disconnect {
+        /// vSwitch ID.
+        id: u32,
+        /// Server numbers to disconnect.
+        #[arg(required = true)]
+        servers: Vec<u32>,
+    },
+    /// Cancel a vSwitch immediately.
+    Cancel {
+        /// vSwitch ID.
+        id: u32,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum FailoverCommand {
     /// List all failover IPs on the account.
     List,
@@ -189,6 +248,13 @@ fn dispatch(client: &RobotClient, cli: &Cli) -> Result<()> {
         Command::Reset { command } => reset_command(client, cli.json, command),
         Command::Boot { command } => boot_command(client, cli.json, command),
         Command::Failover { command } => failover_command(client, cli.json, command),
+        Command::Traffic {
+            kind,
+            from,
+            to,
+            ips,
+        } => traffic_command(client, cli.json, kind, from, to, ips),
+        Command::Vswitch { command } => vswitch_command(client, cli.json, command),
     }
 }
 
@@ -360,6 +426,78 @@ fn print_server(server: &api::server::Server) {
     if let Some(dc) = &server.dc {
         println!("dc:      {dc}");
     }
+}
+
+fn traffic_command(
+    client: &RobotClient,
+    json: bool,
+    kind: &str,
+    from: &str,
+    to: &str,
+    ips: &[String],
+) -> Result<()> {
+    let traffic = api::traffic::query(client, kind, from, to, ips)?;
+    if json {
+        print_json(&traffic)?;
+    } else {
+        for (ip, buckets) in &traffic.data {
+            let total: f64 = buckets.values().map(|statistic| statistic.total).sum();
+            println!("{ip}: {total:.2} GiB");
+        }
+    }
+    Ok(())
+}
+
+fn vswitch_command(client: &RobotClient, json: bool, command: &VSwitchCommand) -> Result<()> {
+    match command {
+        VSwitchCommand::List => {
+            let switches = api::vswitch::list(client)?;
+            if json {
+                print_json(&switches)?;
+            } else if switches.is_empty() {
+                println!("no vSwitches");
+            } else {
+                for vswitch in &switches {
+                    println!("{}  vlan {}  {}", vswitch.id, vswitch.vlan, vswitch.name);
+                }
+            }
+        }
+        VSwitchCommand::Get { id } => {
+            let vswitch = api::vswitch::get(client, *id)?;
+            if json {
+                print_json(&vswitch)?;
+            } else {
+                println!("id:        {}", vswitch.id);
+                println!("name:      {}", vswitch.name);
+                println!("vlan:      {}", vswitch.vlan);
+                println!("cancelled: {}", vswitch.cancelled);
+                for server in &vswitch.server {
+                    println!("server:    {} ({:?})", server.server_number, server.status);
+                }
+            }
+        }
+        VSwitchCommand::Create { name, vlan } => {
+            let vswitch = api::vswitch::create(client, name, *vlan)?;
+            if json {
+                print_json(&vswitch)?;
+            } else {
+                println!("created vSwitch {} (vlan {})", vswitch.id, vswitch.vlan);
+            }
+        }
+        VSwitchCommand::Connect { id, servers } => {
+            api::vswitch::connect(client, *id, servers)?;
+            println!("connected {} server(s) to vSwitch {id}", servers.len());
+        }
+        VSwitchCommand::Disconnect { id, servers } => {
+            api::vswitch::disconnect(client, *id, servers)?;
+            println!("disconnected {} server(s) from vSwitch {id}", servers.len());
+        }
+        VSwitchCommand::Cancel { id } => {
+            api::vswitch::cancel(client, *id)?;
+            println!("cancelled vSwitch {id}");
+        }
+    }
+    Ok(())
 }
 
 fn print_failover_entry(entry: &api::failover::Failover) {

@@ -294,3 +294,117 @@ fn routes_a_failover_ip() {
     assert_eq!(request.url, "https://robot.example/failover/192.0.2.10");
     assert_eq!(request.body.as_deref(), Some("active_server_ip=192.0.2.2"));
 }
+
+#[test]
+fn queries_traffic() {
+    let body = r#"{"type":"month","from":"2026-09-01","to":"2026-09-30",
+                   "data":{"192.0.2.1":{"01":{"in":0.5,"out":1.5,"sum":2.0}}}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let traffic = api::traffic::query(
+        &client,
+        "month",
+        "2026-09-01",
+        "2026-09-30",
+        &["192.0.2.1".to_owned()],
+    )
+    .unwrap();
+    assert_eq!(traffic.kind, "month");
+    assert!((traffic.data["192.0.2.1"]["01"].total - 2.0).abs() < f64::EPSILON);
+
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.url, "https://robot.example/traffic");
+    assert_eq!(
+        request.body.as_deref(),
+        Some("type=month&from=2026-09-01&to=2026-09-30&ip[]=192.0.2.1&single_values=true")
+    );
+}
+
+#[test]
+fn lists_vswitches() {
+    let body = r#"[{"id":50301,"name":"vs-a","vlan":4001,"cancelled":false}]"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let switches = api::vswitch::list(&client).unwrap();
+    assert_eq!(switches.len(), 1);
+    assert_eq!(switches[0].id, 50301);
+    assert_eq!(switches[0].vlan, 4001);
+    assert_eq!(
+        transport.requests()[0].0.url,
+        "https://robot.example/vswitch"
+    );
+}
+
+#[test]
+fn gets_vswitch_with_servers() {
+    let body = r#"{"id":50301,"name":"vs-a","vlan":4001,"cancelled":false,
+                   "server":[{"server_number":2321379,"server_ip":"138.201.21.47","status":"processing"}],
+                   "subnet":[],"cloud_network":[]}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let vswitch = api::vswitch::get(&client, 50301).unwrap();
+    assert_eq!(vswitch.server.len(), 1);
+    assert_eq!(
+        vswitch.server[0].status,
+        api::vswitch::ConnectionStatus::InProcess
+    );
+    assert_eq!(
+        transport.requests()[0].0.url,
+        "https://robot.example/vswitch/50301"
+    );
+}
+
+#[test]
+fn creates_vswitch() {
+    let body = r#"{"id":50302,"name":"vs-b","vlan":4002,"cancelled":false}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let vswitch = api::vswitch::create(&client, "vs-b", 4002).unwrap();
+    assert_eq!(vswitch.id, 50302);
+
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.url, "https://robot.example/vswitch");
+    assert_eq!(request.body.as_deref(), Some("name=vs-b&vlan=4002"));
+}
+
+#[test]
+fn connects_servers_to_vswitch() {
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: "{}".to_owned(),
+    }]);
+
+    api::vswitch::connect(&client, 50301, &[123, 456]).unwrap();
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.url, "https://robot.example/vswitch/50301/server");
+    assert_eq!(request.body.as_deref(), Some("server[]=123&server[]=456"));
+}
+
+#[test]
+fn cancels_vswitch() {
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: "{}".to_owned(),
+    }]);
+
+    api::vswitch::cancel(&client, 50301).unwrap();
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "DELETE");
+    assert_eq!(request.url, "https://robot.example/vswitch/50301");
+    assert_eq!(request.body.as_deref(), Some("cancellation_date=now"));
+}

@@ -10,8 +10,9 @@ a thin command-line interface.
 
 Early (`0.1.0`). Implemented: HTTP transport abstraction, credentials, error
 taxonomy, `server list`/`get`, `rdns get`/`set`, `reset methods`/`run`,
-`boot rescue get`/`activate`/`deactivate`, and `failover list`/`get`/`route`.
-More Robot endpoints (vSwitch, traffic) follow.
+`boot rescue get`/`activate`/`deactivate`, `failover list`/`get`/`route`,
+`traffic` queries, and `vswitch list`/`get`/`create`/`connect`/`disconnect`/`cancel`.
+Remaining Robot areas (keys, subnets, WOL, ordering) follow.
 
 ## Design
 

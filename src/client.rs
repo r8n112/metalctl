@@ -75,6 +75,18 @@ impl<T: Transport> RobotClient<T> {
         deserialize(&response.body)
     }
 
+    /// Performs a form-encoded `POST` request and discards the response body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Api`] for a non-success status or [`Error::Transport`]
+    /// if the request fails.
+    pub fn post_form_ok(&self, path: &str, form: &[(&str, &str)]) -> Result<()> {
+        let body = encode_form(form);
+        self.send("POST", path, Some(body))?;
+        Ok(())
+    }
+
     /// Performs a `DELETE` request and discards the response body.
     ///
     /// # Errors
@@ -83,6 +95,21 @@ impl<T: Transport> RobotClient<T> {
     /// if the request fails.
     pub fn delete(&self, path: &str) -> Result<()> {
         self.send("DELETE", path, None)?;
+        Ok(())
+    }
+
+    /// Performs a form-encoded `DELETE` request and discards the response body.
+    ///
+    /// Some Robot endpoints (for example vSwitch disconnects) require a form
+    /// body on `DELETE`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Api`] for a non-success status or [`Error::Transport`]
+    /// if the request fails.
+    pub fn delete_form(&self, path: &str, form: &[(&str, &str)]) -> Result<()> {
+        let body = encode_form(form);
+        self.send("DELETE", path, Some(body))?;
         Ok(())
     }
 
@@ -122,7 +149,9 @@ fn percent_encode(input: &str) -> String {
     let mut encoded = String::with_capacity(input.len());
     for byte in input.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+            // Brackets are kept literal so PHP-style array parameters such as
+            // `server[]` and `ip[]` reach the API as documented.
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'[' | b']' => {
                 encoded.push(char::from(byte));
             }
             b' ' => encoded.push('+'),
@@ -157,6 +186,12 @@ mod tests {
     fn encodes_form_parameters() {
         let encoded = encode_form(&[("a b", "c&d"), ("x", "1")]);
         assert_eq!(encoded, "a+b=c%26d&x=1");
+    }
+
+    #[test]
+    fn keeps_brackets_literal_in_form_keys() {
+        let encoded = encode_form(&[("server[]", "1"), ("server[]", "2")]);
+        assert_eq!(encoded, "server[]=1&server[]=2");
     }
 
     #[test]
