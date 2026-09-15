@@ -42,6 +42,7 @@ Remaining Robot areas (keys, subnets, WOL, ordering) follow.
   lost. HTTP 429 surfaces as `Error::RateLimited`.
 - **No panics on input.** Errors are typed and actionable; credentials are
   redacted in `Debug` output.
+- **Safe destructive operations.** Mutating commands never run unless confirmed.
 - **Documented public API** with compiling examples.
 
 ## Usage
@@ -53,6 +54,36 @@ export HETZNER_ROBOT_PASSWORD=...
 cargo run -- server list
 cargo run -- server get 321
 cargo run -- --json server list
+```
+
+### Credentials
+
+Credentials are resolved with the precedence **CLI flags → environment → config
+file**:
+
+- flags: `--user <USER>` and `--password-file <PATH>` (the password is read from
+  a file, never passed as a plain argument);
+- environment: `HETZNER_ROBOT_USER` and `HETZNER_ROBOT_PASSWORD`;
+- config file: `$METALCTL_CONFIG`, else `$XDG_CONFIG_HOME/metalctl/config.toml`,
+  else `~/.config/metalctl/config.toml` — a TOML file with `user = "..."` and
+  `password = "..."`. Unknown keys and malformed TOML are rejected. On Unix the
+  file must be owner-only (`chmod 600`); broader permissions are refused.
+  Passwords are never written to logs, errors, or `--json` output.
+
+### Destructive operations
+
+`rdns set`, `reset run`, `boot rescue activate`/`deactivate`, `failover route`,
+and every mutating `vswitch` command require confirmation:
+
+- interactively (stdin is a terminal) you are prompted `[y/N]`;
+- in a non-interactive session (piped stdin, cron, CI) the command **refuses**
+  unless `--yes` is given, so nothing runs just because stdin was unavailable;
+- `--dry-run` prints what would happen and exits **without any network call**
+  and **without requiring credentials** (nothing is sent).
+
+```sh
+metalctl reset run 321 --type power --dry-run   # print only
+metalctl reset run 321 --type power --yes       # non-interactive, confirmed
 ```
 
 As a library:

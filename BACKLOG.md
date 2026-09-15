@@ -35,7 +35,7 @@ Acceptance criteria:
 
 ## T002 — Credential resolution beyond the environment
 
-- Status: todo
+- Status: done
 - Depends on: none
 
 Today credentials come only from `HETZNER_ROBOT_USER`/`HETZNER_ROBOT_PASSWORD`.
@@ -63,7 +63,7 @@ Acceptance criteria:
 
 ## T004 — `--dry-run` for destructive commands
 
-- Status: todo
+- Status: done
 - Depends on: none
 
 `reset run`, `vswitch cancel`, and `boot rescue deactivate` act destructively.
@@ -92,7 +92,7 @@ Acceptance criteria:
 
 ## T006 — CLI integration tests via `--base-url`
 
-- Status: todo
+- Status: done
 - Depends on: T003
 
 Add a hidden `--base-url` (or env override) so the binary can be pointed at a

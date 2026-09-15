@@ -96,8 +96,28 @@ to cover `metalctl-mcp`.
   a lost response may still have applied a reset, cancellation, or route change.
   If you add retries elsewhere, keep this idempotency rule and test it.
 - HTTP 429 becomes `Error::RateLimited`; do not retry it blindly.
-- The MCP server maps 401/403/429 to `invalid_request` and 404 to
-  `resource_not_found`, not `internal_error`.
+- The MCP server returns tool execution failures (transport, auth, 404, 429) as
+  `CallToolResult { is_error: true }`, not JSON-RPC protocol errors. Only a
+  worker-join failure is `internal_error`.
+
+## CLI conventions
+
+- Destructive commands (`rdns set`, `reset run`, `boot rescue activate`/
+  `deactivate`, `failover route`, mutating `vswitch`) must go through
+  `approve(cli, action)`:
+  - `--dry-run` prints the action and performs **no network call**;
+  - `--yes` skips the prompt;
+  - interactive stdin prompts `[y/N]`; **non-interactive stdin is refused**
+    unless `--yes`, so an operation can never run because stdin was absent.
+  - Keep `decide()` pure and tested; never bypass `approve` for a mutation.
+- Credential precedence is **flags → environment → config file**
+  (`Credentials::resolve`). `--password-file` reads from a file; passwords must
+  never be passed as plain arguments or appear in logs/errors/`Debug`.
+- The config file is `$METALCTL_CONFIG` / XDG path, owner-only (`0600`) on Unix;
+  broader permissions are refused.
+- `--base-url` is **hidden** and exists only so `tests/cli.rs` can point the
+  binary at a loopback stub. It is not a supported user feature; do not
+  document it as one or add it to README usage examples.
 
 ## How to add an endpoint
 
