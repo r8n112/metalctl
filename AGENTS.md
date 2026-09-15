@@ -54,8 +54,11 @@ just audit  # cargo-deny
 just ci     # everything, as CI runs it
 ```
 
+MSRV is **Rust 1.88** (dictated by `rmcp` in the MCP member; CI enforces it).
 The crate targets stable Rust (`rust-toolchain.toml`). If stable is not
-installed locally, prefix commands with `RUSTUP_TOOLCHAIN=nightly`.
+installed locally, prefix commands with `RUSTUP_TOOLCHAIN=nightly`. CI runs
+`cargo … --workspace`; the root being a package means `--workspace` is required
+to cover `metalctl-mcp`.
 
 ## Architecture
 
@@ -84,6 +87,17 @@ installed locally, prefix commands with `RUSTUP_TOOLCHAIN=nightly`.
 - `GET /server` returns an array of envelopes; `GET /server/{n}` a single one.
 - Forms use `application/x-www-form-urlencoded`; array parameters are written
   as `key[]`.
+
+## Reliability
+
+- Requests are timeout-bounded (`UreqTransport::with_timeout(s)`).
+- `RobotClient` retries transient transport errors **only for `GET`** (with
+  exponential backoff, `RetryPolicy`). Never retry `POST`/`DELETE` automatically:
+  a lost response may still have applied a reset, cancellation, or route change.
+  If you add retries elsewhere, keep this idempotency rule and test it.
+- HTTP 429 becomes `Error::RateLimited`; do not retry it blindly.
+- The MCP server maps 401/403/429 to `invalid_request` and 404 to
+  `resource_not_found`, not `internal_error`.
 
 ## How to add an endpoint
 

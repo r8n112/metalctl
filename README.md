@@ -35,6 +35,11 @@ Remaining Robot areas (keys, subnets, WOL, ordering) follow.
   `ureq`, tests inject an in-memory mock, so the whole suite runs offline.
 - **Minimal dependencies.** `serde`/`serde_json`, `thiserror`, `base64`,
   `ureq`, `clap`. No async runtime.
+- **Bounded, idempotency-aware requests.** `UreqTransport` enforces
+  connect/read/write timeouts (default 30s). `RobotClient` retries transient
+  transport errors on idempotent `GET`s with exponential backoff, but **never**
+  retries `POST`/`DELETE`, which may have applied even when the response is
+  lost. HTTP 429 surfaces as `Error::RateLimited`.
 - **No panics on input.** Errors are typed and actionable; credentials are
   redacted in `Debug` output.
 - **Documented public API** with compiling examples.
@@ -90,9 +95,11 @@ Register it with an MCP client (opencode example):
 }
 ```
 
-Read-only tools run directly. Destructive tools (`reset_run`, `rdns_set`,
-`failover_route`, `vswitch_cancel`, the rescue-system changes, ...) refuse to run
-unless called with `confirm = true`, so an agent cannot mutate a server by
+Tools advertise MCP annotations (`readOnlyHint` for reads, `destructiveHint` for
+mutations) so clients can reason about safety. Read-only tools run directly;
+destructive tools (`reset_run`, `rdns_set`, `failover_route`, `vswitch_cancel`,
+the rescue-system changes, ...) refuse to run unless called with
+`confirm = true`, so an agent cannot mutate a server by
 accident.
 
 ## Development
@@ -105,7 +112,9 @@ just audit      # cargo-deny (advisories/licenses/bans/sources)
 just ci         # everything, as CI runs it
 ```
 
-Toolchain: stable (`rust-toolchain.toml`). Targets stable Rust 1.74+.
+Toolchain: stable (`rust-toolchain.toml`). MSRV is **Rust 1.88** (dictated by
+`rmcp` in the `metalctl-mcp` member; CI enforces it). Commands operate on the
+whole workspace, so pass `-p metalctl` for just the library/CLI.
 
 ## License
 

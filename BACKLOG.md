@@ -14,6 +14,11 @@ query, `vswitch list/get/create/connect/disconnect/cancel`, and a full-parity
 **MCP server** (`crates/metalctl-mcp`, 19 tools, destructive tools gated on
 `confirm = true`).
 
+Foundations also done: bounded request timeouts, idempotency-aware `GET` retry,
+`Error::RateLimited` for 429, an injectable MCP transport, an MCP end-to-end test
+(initialize → tools/list → tools/call → confirm rejection), MCP tool annotations,
+a workspace MSRV job (Rust 1.88), and CI now running `--workspace`.
+
 ## T001 — Shell completions and a man page
 
 - Status: todo
@@ -72,7 +77,7 @@ Acceptance criteria:
 
 ## T005 — Transport hardening: timeouts, retry, rate limits
 
-- Status: todo
+- Status: done
 - Depends on: none
 
 `UreqTransport` has no timeout. Add a configurable timeout, one bounded retry
@@ -101,7 +106,7 @@ Acceptance criteria:
 
 ## T007 — MSRV CI job
 
-- Status: todo
+- Status: done (workspace MSRV reconciled to 1.88)
 - Depends on: none
 
 The manifest declares `rust-version = "1.74"`. Add a CI job that builds with the
@@ -127,7 +132,7 @@ Acceptance criteria:
 
 ## T009 — MCP tool annotations
 
-- Status: todo
+- Status: done
 - Depends on: none
 
 Advertise MCP tool annotations (`readOnlyHint`, `destructiveHint`,
@@ -142,7 +147,7 @@ Acceptance criteria:
 
 ## T010 — MCP end-to-end test
 
-- Status: todo
+- Status: done
 - Depends on: none
 
 Add an in-process test that drives the server with the `rmcp` client over a
