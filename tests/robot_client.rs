@@ -258,3 +258,39 @@ fn deactivates_rescue() {
     assert_eq!(request.method, "DELETE");
     assert_eq!(request.url, "https://robot.example/boot/321/rescue");
 }
+
+#[test]
+fn lists_failover_ips() {
+    let body = r#"[{"failover":{"ip":"192.0.2.10","active_server_ip":"192.0.2.1"}},
+                   {"failover":{"ip":"192.0.2.11","netmask":"255.255.255.255"}}]"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let entries = api::failover::list(&client).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].active_server_ip.as_deref(), Some("192.0.2.1"));
+    assert_eq!(entries[1].netmask.as_deref(), Some("255.255.255.255"));
+    assert_eq!(
+        transport.requests()[0].0.url,
+        "https://robot.example/failover"
+    );
+}
+
+#[test]
+fn routes_a_failover_ip() {
+    let body = r#"{"failover":{"ip":"192.0.2.10","active_server_ip":"192.0.2.2"}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let entry = api::failover::route(&client, "192.0.2.10", "192.0.2.2").unwrap();
+    assert_eq!(entry.active_server_ip.as_deref(), Some("192.0.2.2"));
+
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.url, "https://robot.example/failover/192.0.2.10");
+    assert_eq!(request.body.as_deref(), Some("active_server_ip=192.0.2.2"));
+}
