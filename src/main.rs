@@ -30,6 +30,11 @@ enum Command {
         #[command(subcommand)]
         command: RdnsCommand,
     },
+    /// Reset a dedicated server.
+    Reset {
+        #[command(subcommand)]
+        command: ResetCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -57,6 +62,43 @@ enum RdnsCommand {
         /// PTR record value.
         ptr: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ResetCommand {
+    /// List the reset methods available for a server.
+    Methods {
+        /// Server number.
+        number: u32,
+    },
+    /// Execute a reset for a server.
+    Run {
+        /// Server number.
+        number: u32,
+        /// Reset method.
+        #[arg(value_enum)]
+        kind: ResetKind,
+    },
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum ResetKind {
+    /// Software reset.
+    Sw,
+    /// Hardware reset.
+    Hw,
+    /// Power cycle.
+    Power,
+}
+
+impl From<ResetKind> for api::reset::ResetType {
+    fn from(value: ResetKind) -> Self {
+        match value {
+            ResetKind::Sw => Self::Software,
+            ResetKind::Hw => Self::Hardware,
+            ResetKind::Power => Self::Power,
+        }
+    }
 }
 
 fn main() -> std::process::ExitCode {
@@ -106,6 +148,26 @@ fn run(cli: &Cli) -> Result<()> {
                     print_json(&entry)?;
                 } else {
                     print_rdns(&entry);
+                }
+            }
+        },
+        Command::Reset { command } => match command {
+            ResetCommand::Methods { number } => {
+                let options = api::reset::options(&client, *number)?;
+                if cli.json {
+                    print_json(&options)?;
+                } else {
+                    println!("server:  {}", options.server_number);
+                    println!("methods: {}", options.types.join(", "));
+                }
+            }
+            ResetCommand::Run { number, kind } => {
+                let result = api::reset::execute(&client, *number, (*kind).into())?;
+                if cli.json {
+                    print_json(&result)?;
+                } else {
+                    println!("server: {}", result.server_number);
+                    println!("reset:  {}", result.kind);
                 }
             }
         },

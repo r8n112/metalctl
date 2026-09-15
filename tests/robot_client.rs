@@ -165,3 +165,37 @@ fn sets_reverse_dns_with_form_body() {
     assert_eq!(request.url, "https://robot.example/rdns/192.0.2.1");
     assert_eq!(request.body.as_deref(), Some("ptr=new.example.com"));
 }
+
+#[test]
+fn lists_reset_methods() {
+    let body = r#"{"reset":{"server_number":321,"type":["sw","hw","power"]}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let options = api::reset::options(&client, 321).unwrap();
+    assert_eq!(options.server_number, 321);
+    assert_eq!(options.types, vec!["sw", "hw", "power"]);
+    assert_eq!(
+        transport.requests()[0].0.url,
+        "https://robot.example/reset/321"
+    );
+}
+
+#[test]
+fn executes_a_reset() {
+    let body = r#"{"reset":{"server_number":321,"type":"hw"}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let result = api::reset::execute(&client, 321, api::reset::ResetType::Hardware).unwrap();
+    assert_eq!(result.kind, "hw");
+
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.url, "https://robot.example/reset/321");
+    assert_eq!(request.body.as_deref(), Some("type=hw"));
+}
