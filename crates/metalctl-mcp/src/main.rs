@@ -581,6 +581,11 @@ impl Metalctl {
     }
 }
 
+// rmcp's `#[tool_handler]` generates the async trait methods below; its
+// `async fn list_tools` has no `.await`, which stable Clippy 1.98+ reports as
+// `unused_async_trait_impl`. The code is not ours to change, so allow it for
+// this generated implementation only.
+#[allow(clippy::unused_async_trait_impl)]
 #[tool_handler]
 impl ServerHandler for Metalctl {
     fn get_info(&self) -> ServerInfo {
