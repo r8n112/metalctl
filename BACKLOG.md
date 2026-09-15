@@ -10,7 +10,9 @@ sync/minimal posture over adding endpoints purely to match `hrobot`.
 
 Already implemented: `server list/get`, `rdns get/set`, `reset methods/run`,
 `boot rescue` (get/activate/deactivate), `failover list/get/route`, `traffic`
-query, `vswitch list/get/create/connect/disconnect/cancel`.
+query, `vswitch list/get/create/connect/disconnect/cancel`, and a full-parity
+**MCP server** (`crates/metalctl-mcp`, 19 tools, destructive tools gated on
+`confirm = true`).
 
 ## T001 — Shell completions and a man page
 
@@ -121,4 +123,47 @@ coverage.
 Acceptance criteria:
 - [ ] each added endpoint has a mocked request/parse test
 - [ ] the README's "Prior art and scope" section remains accurate
+- [ ] `just ci` green
+
+## T009 — MCP tool annotations
+
+- Status: todo
+- Depends on: none
+
+Advertise MCP tool annotations (`readOnlyHint`, `destructiveHint`,
+`idempotentHint`) on every tool so clients can reason about safety without
+parsing descriptions.
+
+Acceptance criteria:
+- [ ] read-only tools are marked `readOnlyHint = true`
+- [ ] mutating tools are marked `destructiveHint = true`
+- [ ] `registers_all_tools` still passes
+- [ ] `just ci` green
+
+## T010 — MCP end-to-end test
+
+- Status: todo
+- Depends on: none
+
+Add an in-process test that drives the server with the `rmcp` client over a
+duplex transport: `initialize`, `tools/list`, and one `tools/call` against a
+mock transport.
+
+Acceptance criteria:
+- [ ] the test asserts all 19 tools are listed
+- [ ] a destructive tool without `confirm = true` is rejected
+- [ ] no network access
+- [ ] `just ci` green
+
+## T011 — Optional streamable HTTP transport for the MCP server
+
+- Status: todo
+- Depends on: T010
+
+Stdio is enough for local agents; add an opt-in HTTP transport (behind a flag)
+for remote/docker use, refusing to start without credentials.
+
+Acceptance criteria:
+- [ ] transport is opt-in and off by default
+- [ ] documented in the README
 - [ ] `just ci` green

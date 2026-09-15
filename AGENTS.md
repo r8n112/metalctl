@@ -5,8 +5,13 @@ autonomous coding agent, read this file in full before making any change.
 
 ## What this project is
 
-`metalctl` is a small **synchronous** Rust library and CLI for the **Hetzner
-Robot** (bare-metal) API.
+This is a Cargo **workspace**:
+
+- `metalctl` — a small **synchronous** Rust library and CLI for the **Hetzner
+  Robot** (bare-metal) API (the root package).
+- `crates/metalctl-mcp` — a **Model Context Protocol** server (`metalctl-mcp`)
+  that exposes every command as a tool over stdio. It is async (`rmcp` + tokio)
+  and calls the sync library via `spawn_blocking`.
 
 **Prior art / scope:** [`hrobot-rs`](https://github.com/MathiasPius/hrobot-rs)
 is a mature **async** Robot client with broader API coverage. We do **not** aim
@@ -14,6 +19,10 @@ to replace it or reach parity. `metalctl`'s reason to exist is a sync,
 minimal-dependency, CLI-first client with offline deterministic tests. When
 choosing work, prefer CLI/ergonomics and the sync/minimal posture over adding
 endpoint modules purely to match `hrobot`.
+
+**MCP rule:** destructive tools must require `confirm = true` and must never be
+made implicit. Read-only tools are free. Tool names mirror the CLI (`reset_run`,
+`vswitch_cancel`, ...).
 
 `BACKLOG.md` is the authoritative task list.
 
@@ -62,6 +71,9 @@ installed locally, prefix commands with `RUSTUP_TOOLCHAIN=nightly`.
 - `src/api/*.rs` — one module per endpoint group: `server`, `rdns`, `reset`,
   `boot`, `failover`, `traffic`, `vswitch`.
 - `src/main.rs` — `clap` CLI; one handler function per command group.
+- `crates/metalctl-mcp/src/main.rs` — the MCP server: `#[tool_router]` tools,
+  `blocking` helper (`spawn_blocking`), `require_confirm` gate, and a
+  `registers_all_tools` test.
 
 ## Robot API conventions
 

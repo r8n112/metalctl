@@ -61,6 +61,40 @@ for server in api::server::list(&client)? {
 }
 ```
 
+## MCP server (`metalctl-mcp`)
+
+The repository is a Cargo workspace: the `metalctl` library/CLI plus
+`crates/metalctl-mcp`, a [Model Context Protocol](https://modelcontextprotocol.io)
+server exposing every command as a tool over stdio.
+
+```sh
+cargo build -p metalctl-mcp
+cargo install --path crates/metalctl-mcp   # optional, installs `metalctl-mcp`
+```
+
+Register it with an MCP client (opencode example):
+
+```json
+{
+  "mcp": {
+    "metalctl": {
+      "type": "local",
+      "command": ["metalctl-mcp"],
+      "enabled": true,
+      "environment": {
+        "HETZNER_ROBOT_USER": "{env:HETZNER_ROBOT_USER}",
+        "HETZNER_ROBOT_PASSWORD": "{env:HETZNER_ROBOT_PASSWORD}"
+      }
+    }
+  }
+}
+```
+
+Read-only tools run directly. Destructive tools (`reset_run`, `rdns_set`,
+`failover_route`, `vswitch_cancel`, the rescue-system changes, ...) refuse to run
+unless called with `confirm = true`, so an agent cannot mutate a server by
+accident.
+
 ## Development
 
 ```sh
