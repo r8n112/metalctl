@@ -45,7 +45,8 @@ impl Credentials {
         Ok(Self { username, password })
     }
 
-    /// Reads credentials from [`USER_ENV`] and [`PASSWORD_ENV`].
+    /// Reads credentials from the `HETZNER_ROBOT_USER` and
+    /// `HETZNER_ROBOT_PASSWORD` environment variables.
     ///
     /// # Errors
     ///
