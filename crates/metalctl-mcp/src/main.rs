@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use metalctl::api;
-use metalctl::{Credentials, RobotClient};
+use metalctl::{
+    Credentials, HttpRequest, HttpResponse, RobotClient, Transport, UreqTransport, DEFAULT_BASE_URL,
+};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -18,34 +20,93 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Adapts a shared, boxed transport to the client's `Transport` bound.
+///
+/// This is what makes the MCP server testable offline: tests build a
+/// `Metalctl` around a mock transport instead of the network.
+#[derive(Clone)]
+struct SharedTransport(Arc<dyn Transport + Send + Sync>);
+
+impl Transport for SharedTransport {
+    fn execute(
+        &self,
+        request: &HttpRequest,
+        authorization: &str,
+    ) -> metalctl::Result<HttpResponse> {
+        self.0.execute(request, authorization)
+    }
+}
+
+/// The concrete client type used by the server.
+type Client = RobotClient<SharedTransport>;
+
 /// The MCP server state: a shared, synchronous Robot client and the tool router.
 #[derive(Clone)]
 struct Metalctl {
-    client: Arc<RobotClient>,
+    client: Arc<Client>,
     /// Read by the code generated from `#[tool_handler]`.
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 
-/// Runs a blocking `metalctl` call on the blocking thread pool.
-async fn blocking<T, F>(client: Arc<RobotClient>, call: F) -> Result<T, McpError>
-where
-    T: Send + 'static,
-    F: FnOnce(&RobotClient) -> metalctl::Result<T> + Send + 'static,
-{
-    tokio::task::spawn_blocking(move || call(&client))
-        .await
-        .map_err(|error| McpError::internal_error(format!("worker join error: {error}"), None))?
-        .map_err(|error| map_error(&error))
+impl Metalctl {
+    /// Builds a server around an existing client (used by tests and `main`).
+    fn with_client(client: Arc<Client>) -> Self {
+        Self {
+            client,
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    /// Builds a server from credentials, using the real `ureq` transport.
+    fn from_credentials(credentials: Credentials) -> Self {
+        let transport = SharedTransport(Arc::new(UreqTransport::new()));
+        let client = Arc::new(RobotClient::with_transport(
+            DEFAULT_BASE_URL,
+            credentials,
+            transport,
+        ));
+        Self::with_client(client)
+    }
 }
 
-fn map_error(error: &metalctl::Error) -> McpError {
-    match error {
-        metalctl::Error::Api { status: 404, .. } => {
-            McpError::resource_not_found(error.to_string(), None)
-        }
-        _ => McpError::internal_error(error.to_string(), None),
+/// Runs a blocking `metalctl` call on the blocking thread pool.
+///
+/// The inner `Result` is the Robot call's outcome; only a worker-join failure is
+/// surfaced as a JSON-RPC error.
+async fn call<T, F>(client: Arc<Client>, f: F) -> Result<metalctl::Result<T>, McpError>
+where
+    T: Send + 'static,
+    F: FnOnce(&Client) -> metalctl::Result<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || f(&client))
+        .await
+        .map_err(|error| McpError::internal_error(format!("worker join error: {error}"), None))
+}
+
+/// Maps a Robot call outcome to a tool result.
+///
+/// Execution failures (transport, auth, 404, rate limit, ...) become
+/// `CallToolResult { is_error: true }` — the MCP representation for a tool that
+/// ran and failed. They are *not* JSON-RPC protocol errors, which MCP reserves
+/// for malformed requests. The confirmation refusal takes the same shape.
+fn report<T: Serialize>(result: metalctl::Result<T>) -> Result<CallToolResult, McpError> {
+    match result {
+        Ok(value) => json_result(&value),
+        Err(error) => Ok(tool_error(&error)),
     }
+}
+
+/// Like [`report`] for calls that produce no response body.
+fn report_unit(result: metalctl::Result<()>, message: &str) -> CallToolResult {
+    match result {
+        Ok(()) => ok_result(message),
+        Err(error) => tool_error(&error),
+    }
+}
+
+fn tool_error(error: &metalctl::Error) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(error.to_string())])
 }
 
 fn json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError> {
@@ -58,16 +119,18 @@ fn ok_result(message: &str) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(message.to_string())])
 }
 
-fn require_confirm(confirm: bool, action: &str) -> Result<(), McpError> {
+/// Refuses a destructive operation unless `confirm` is set.
+///
+/// Returns the tool result to hand back on refusal. A missing confirmation is a
+/// tool-level error (`is_error`), not a JSON-RPC protocol error, so clients
+/// surface it consistently with other execution failures.
+fn require_confirm(confirm: bool, action: &str) -> Result<(), CallToolResult> {
     if confirm {
         Ok(())
     } else {
-        Err(McpError::invalid_params(
-            format!(
-                "refusing to {action}: call again with confirm=true once the user has approved"
-            ),
-            None,
-        ))
+        Err(CallToolResult::error(vec![ContentBlock::text(format!(
+            "refusing to {action}: call again with confirm=true once the user has approved"
+        ))]))
     }
 }
 
@@ -230,19 +293,12 @@ struct TrafficQuery {
 
 #[tool_router]
 impl Metalctl {
-    fn new(client: Arc<RobotClient>) -> Self {
-        Self {
-            client,
-            tool_router: Self::tool_router(),
-        }
-    }
-
     // ----- read-only -------------------------------------------------------
 
     #[tool(description = "List all dedicated servers on the Hetzner Robot account")]
     async fn server_list(&self) -> Result<CallToolResult, McpError> {
-        let servers = blocking(self.client.clone(), api::server::list).await?;
-        json_result(&servers)
+        let result = call(self.client.clone(), api::server::list).await?;
+        report(result)
     }
 
     #[tool(description = "Show a single dedicated server by its server number")]
@@ -250,11 +306,11 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<ServerNumber>,
     ) -> Result<CallToolResult, McpError> {
-        let server = blocking(self.client.clone(), move |c| {
+        let result = call(self.client.clone(), move |c| {
             api::server::get(c, p.server_number)
         })
         .await?;
-        json_result(&server)
+        report(result)
     }
 
     #[tool(description = "Show the reverse DNS PTR record for an IP address")]
@@ -262,8 +318,8 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<IpParam>,
     ) -> Result<CallToolResult, McpError> {
-        let entry = blocking(self.client.clone(), move |c| api::rdns::get(c, &p.ip)).await?;
-        json_result(&entry)
+        let result = call(self.client.clone(), move |c| api::rdns::get(c, &p.ip)).await?;
+        report(result)
     }
 
     #[tool(description = "List the reset methods available for a dedicated server")]
@@ -271,11 +327,11 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<ServerNumber>,
     ) -> Result<CallToolResult, McpError> {
-        let options = blocking(self.client.clone(), move |c| {
+        let result = call(self.client.clone(), move |c| {
             api::reset::options(c, p.server_number)
         })
         .await?;
-        json_result(&options)
+        report(result)
     }
 
     #[tool(description = "Show the current rescue system configuration for a server")]
@@ -283,17 +339,17 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<ServerNumber>,
     ) -> Result<CallToolResult, McpError> {
-        let rescue = blocking(self.client.clone(), move |c| {
+        let result = call(self.client.clone(), move |c| {
             api::boot::rescue(c, p.server_number)
         })
         .await?;
-        json_result(&rescue)
+        report(result)
     }
 
     #[tool(description = "List all failover IPs on the Hetzner Robot account")]
     async fn failover_list(&self) -> Result<CallToolResult, McpError> {
-        let entries = blocking(self.client.clone(), api::failover::list).await?;
-        json_result(&entries)
+        let result = call(self.client.clone(), api::failover::list).await?;
+        report(result)
     }
 
     #[tool(description = "Show a single failover IP and its current routing target")]
@@ -301,8 +357,8 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<IpParam>,
     ) -> Result<CallToolResult, McpError> {
-        let entry = blocking(self.client.clone(), move |c| api::failover::get(c, &p.ip)).await?;
-        json_result(&entry)
+        let result = call(self.client.clone(), move |c| api::failover::get(c, &p.ip)).await?;
+        report(result)
     }
 
     #[tool(
@@ -312,17 +368,17 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<TrafficQuery>,
     ) -> Result<CallToolResult, McpError> {
-        let traffic = blocking(self.client.clone(), move |c| {
+        let result = call(self.client.clone(), move |c| {
             api::traffic::query(c, &p.kind, &p.from, &p.to, &p.ips)
         })
         .await?;
-        json_result(&traffic)
+        report(result)
     }
 
     #[tool(description = "List all vSwitches on the Hetzner Robot account")]
     async fn vswitch_list(&self) -> Result<CallToolResult, McpError> {
-        let switches = blocking(self.client.clone(), api::vswitch::list).await?;
-        json_result(&switches)
+        let result = call(self.client.clone(), api::vswitch::list).await?;
+        report(result)
     }
 
     #[tool(description = "Show a single vSwitch, including connected servers")]
@@ -330,8 +386,8 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<IdParam>,
     ) -> Result<CallToolResult, McpError> {
-        let vswitch = blocking(self.client.clone(), move |c| api::vswitch::get(c, p.id)).await?;
-        json_result(&vswitch)
+        let result = call(self.client.clone(), move |c| api::vswitch::get(c, p.id)).await?;
+        report(result)
     }
 
     // ----- destructive (require confirm=true) ------------------------------
@@ -343,12 +399,14 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<RdnsSet>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "change reverse DNS")?;
-        let entry = blocking(self.client.clone(), move |c| {
+        if let Err(refusal) = require_confirm(p.confirm, "change reverse DNS") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| {
             api::rdns::set(c, &p.ip, &p.ptr)
         })
         .await?;
-        json_result(&entry)
+        report(result)
     }
 
     #[tool(
@@ -358,13 +416,15 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<ResetRun>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "reset the server")?;
+        if let Err(refusal) = require_confirm(p.confirm, "reset the server") {
+            return Ok(refusal);
+        }
         let kind: api::reset::ResetType = p.kind.into();
-        let result = blocking(self.client.clone(), move |c| {
+        let result = call(self.client.clone(), move |c| {
             api::reset::execute(c, p.server_number, kind)
         })
         .await?;
-        json_result(&result)
+        report(result)
     }
 
     #[tool(
@@ -374,12 +434,14 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<RescueActivate>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "activate the rescue system")?;
-        let rescue = blocking(self.client.clone(), move |c| {
+        if let Err(refusal) = require_confirm(p.confirm, "activate the rescue system") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| {
             api::boot::activate_rescue(c, p.server_number, &p.os, &p.arch, &p.authorized_keys)
         })
         .await?;
-        json_result(&rescue)
+        report(result)
     }
 
     #[tool(
@@ -389,12 +451,14 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<ServerConfirm>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "deactivate the rescue system")?;
-        blocking(self.client.clone(), move |c| {
+        if let Err(refusal) = require_confirm(p.confirm, "deactivate the rescue system") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| {
             api::boot::deactivate_rescue(c, p.server_number)
         })
         .await?;
-        Ok(ok_result("rescue system deactivated"))
+        Ok(report_unit(result, "rescue system deactivated"))
     }
 
     #[tool(
@@ -404,12 +468,14 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<FailoverRoute>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "move the failover IP")?;
-        let entry = blocking(self.client.clone(), move |c| {
+        if let Err(refusal) = require_confirm(p.confirm, "move the failover IP") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| {
             api::failover::route(c, &p.ip, &p.target)
         })
         .await?;
-        json_result(&entry)
+        report(result)
     }
 
     #[tool(description = "Create a vSwitch. Destructive: requires confirm=true.")]
@@ -417,12 +483,14 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<VSwitchCreate>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "create a vSwitch")?;
-        let vswitch = blocking(self.client.clone(), move |c| {
+        if let Err(refusal) = require_confirm(p.confirm, "create a vSwitch") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| {
             api::vswitch::create(c, &p.name, p.vlan)
         })
         .await?;
-        json_result(&vswitch)
+        report(result)
     }
 
     #[tool(description = "Connect servers to a vSwitch. Destructive: requires confirm=true.")]
@@ -430,12 +498,14 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<VSwitchServers>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "connect servers to a vSwitch")?;
-        blocking(self.client.clone(), move |c| {
+        if let Err(refusal) = require_confirm(p.confirm, "connect servers to a vSwitch") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| {
             api::vswitch::connect(c, p.id, &p.servers)
         })
         .await?;
-        Ok(ok_result("servers connected"))
+        Ok(report_unit(result, "servers connected"))
     }
 
     #[tool(description = "Disconnect servers from a vSwitch. Destructive: requires confirm=true.")]
@@ -443,12 +513,14 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<VSwitchServers>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "disconnect servers from a vSwitch")?;
-        blocking(self.client.clone(), move |c| {
+        if let Err(refusal) = require_confirm(p.confirm, "disconnect servers from a vSwitch") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| {
             api::vswitch::disconnect(c, p.id, &p.servers)
         })
         .await?;
-        Ok(ok_result("servers disconnected"))
+        Ok(report_unit(result, "servers disconnected"))
     }
 
     #[tool(description = "Cancel a vSwitch immediately. Destructive: requires confirm=true.")]
@@ -456,9 +528,11 @@ impl Metalctl {
         &self,
         Parameters(p): Parameters<VSwitchCancel>,
     ) -> Result<CallToolResult, McpError> {
-        require_confirm(p.confirm, "cancel the vSwitch")?;
-        blocking(self.client.clone(), move |c| api::vswitch::cancel(c, p.id)).await?;
-        Ok(ok_result("vSwitch cancelled"))
+        if let Err(refusal) = require_confirm(p.confirm, "cancel the vSwitch") {
+            return Ok(refusal);
+        }
+        let result = call(self.client.clone(), move |c| api::vswitch::cancel(c, p.id)).await?;
+        Ok(report_unit(result, "vSwitch cancelled"))
     }
 }
 
@@ -478,8 +552,7 @@ impl ServerHandler for Metalctl {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let credentials = Credentials::from_env()?;
-    let server = Metalctl::new(Arc::new(RobotClient::new(credentials)));
+    let server = Metalctl::from_credentials(Credentials::from_env()?);
     let service = server.serve(rmcp::transport::stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -487,6 +560,8 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
 
     #[test]
@@ -503,10 +578,58 @@ mod tests {
         assert!(require_confirm(true, "reset the server").is_ok());
     }
 
+    /// A transport that records every request and answers from fixtures.
+    #[derive(Default)]
+    struct RecordingTransport {
+        requests: Mutex<Vec<HttpRequest>>,
+    }
+
+    impl RecordingTransport {
+        fn requests(&self) -> Vec<HttpRequest> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl Transport for RecordingTransport {
+        fn execute(
+            &self,
+            request: &HttpRequest,
+            _authorization: &str,
+        ) -> metalctl::Result<HttpResponse> {
+            self.requests.lock().unwrap().push(request.clone());
+            let (status, body) = if request.url.ends_with("/server") {
+                (
+                    200,
+                    r#"[{"server":{"server_number":321,"server_name":"alpha","server_ip":"192.0.2.1"}}]"#
+                        .to_owned(),
+                )
+            } else if request.url.contains("/rdns/") {
+                (
+                    401,
+                    r#"{"error":{"status":401,"code":"UNAUTHORIZED","message":"unauthorized"}}"#
+                        .to_owned(),
+                )
+            } else {
+                (200, "{}".to_owned())
+            };
+            Ok(HttpResponse { status, body })
+        }
+    }
+
+    fn test_server() -> (Metalctl, Arc<RecordingTransport>) {
+        let transport = Arc::new(RecordingTransport::default());
+        let credentials = Credentials::new("user", "pass").unwrap();
+        let client = Arc::new(RobotClient::with_transport(
+            "http://stub",
+            credentials,
+            SharedTransport(transport.clone()),
+        ));
+        (Metalctl::with_client(client), transport)
+    }
+
     #[test]
     fn registers_all_tools() {
-        let credentials = Credentials::new("user", "pass").unwrap();
-        let server = Metalctl::new(Arc::new(RobotClient::new(credentials)));
+        let (server, _transport) = test_server();
         let names: Vec<String> = server
             .tool_router
             .list_all()
@@ -541,5 +664,105 @@ mod tests {
             );
         }
         assert_eq!(names.len(), 19);
+    }
+
+    #[derive(Clone, Default)]
+    struct TestClient;
+
+    impl rmcp::ClientHandler for TestClient {}
+
+    #[tokio::test]
+    async fn mcp_end_to_end_destructive_contract() {
+        let (server, transport) = test_server();
+        let (server_io, client_io) = tokio::io::duplex(8192);
+        let server_task = tokio::spawn(async move { server.serve(server_io).await });
+
+        let client = TestClient
+            .serve(client_io)
+            .await
+            .expect("client should connect");
+
+        // tools/list: all 19 tools are exposed.
+        let tools = client.list_all_tools().await.expect("tools/list");
+        assert_eq!(tools.len(), 19);
+
+        // A read-only call reaches the transport and returns the fixture.
+        let listed = client
+            .call_tool(rmcp::model::CallToolRequestParams::new("server_list"))
+            .await
+            .expect("tools/call server_list");
+        assert_ne!(listed.is_error, Some(true));
+        assert!(serde_json::to_string(&listed).unwrap().contains("alpha"));
+        assert_eq!(transport.requests().len(), 1);
+
+        // Destructive tool WITHOUT confirm=true: rejected as a tool error, and
+        // the transport must not be reached.
+        let rejected = client
+            .call_tool(
+                rmcp::model::CallToolRequestParams::new("vswitch_cancel")
+                    .with_arguments(rmcp::object!({ "id": 50301 })),
+            )
+            .await
+            .expect("a confirmation refusal is a tool result");
+        assert_eq!(rejected.is_error, Some(true), "must be an error result");
+        assert!(
+            serde_json::to_string(&rejected)
+                .unwrap()
+                .contains("confirm"),
+            "the error should explain the missing confirmation"
+        );
+        assert_eq!(
+            transport.requests().len(),
+            1,
+            "no request may be sent without confirm"
+        );
+
+        // Destructive tool WITH confirm=true: accepted and reaches the transport
+        // with the expected request.
+        let accepted = client
+            .call_tool(
+                rmcp::model::CallToolRequestParams::new("vswitch_cancel")
+                    .with_arguments(rmcp::object!({ "id": 50301, "confirm": true })),
+            )
+            .await
+            .expect("a confirmed cancel is a tool result");
+        assert_ne!(accepted.is_error, Some(true));
+
+        let requests = transport.requests();
+        assert_eq!(
+            requests.len(),
+            2,
+            "exactly one request for the confirmed cancel"
+        );
+        let cancel = &requests[1];
+        assert_eq!(cancel.method, "DELETE");
+        assert_eq!(cancel.url, "http://stub/vswitch/50301");
+        assert_eq!(cancel.body.as_deref(), Some("cancellation_date=now"));
+
+        server_task.abort();
+    }
+
+    #[tokio::test]
+    async fn api_errors_are_tool_error_results() {
+        let (server, _transport) = test_server();
+        let (server_io, client_io) = tokio::io::duplex(8192);
+        let server_task = tokio::spawn(async move { server.serve(server_io).await });
+
+        let client = TestClient
+            .serve(client_io)
+            .await
+            .expect("client should connect");
+
+        let result = client
+            .call_tool(
+                rmcp::model::CallToolRequestParams::new("rdns_get")
+                    .with_arguments(rmcp::object!({ "ip": "192.0.2.1" })),
+            )
+            .await
+            .expect("an API failure is a tool result, not a protocol error");
+        assert_eq!(result.is_error, Some(true));
+        assert!(serde_json::to_string(&result).unwrap().contains("401"));
+
+        server_task.abort();
     }
 }
