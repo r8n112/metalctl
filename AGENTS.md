@@ -5,9 +5,17 @@ autonomous coding agent, read this file in full before making any change.
 
 ## What this project is
 
-`metalctl` is a low-level Rust library and CLI for the **Hetzner Robot**
-(bare-metal) API. Look at `BACKLOG.md` for what is still missing; that file is
-the authoritative task list.
+`metalctl` is a small **synchronous** Rust library and CLI for the **Hetzner
+Robot** (bare-metal) API.
+
+**Prior art / scope:** [`hrobot-rs`](https://github.com/MathiasPius/hrobot-rs)
+is a mature **async** Robot client with broader API coverage. We do **not** aim
+to replace it or reach parity. `metalctl`'s reason to exist is a sync,
+minimal-dependency, CLI-first client with offline deterministic tests. When
+choosing work, prefer CLI/ergonomics and the sync/minimal posture over adding
+endpoint modules purely to match `hrobot`.
+
+`BACKLOG.md` is the authoritative task list.
 
 ## Non-negotiables
 

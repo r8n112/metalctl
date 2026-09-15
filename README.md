@@ -1,10 +1,25 @@
 # metalctl
 
-A low-level Rust library and CLI for the **Hetzner Robot** (bare-metal) API.
+A small, synchronous Rust library and CLI for the **Hetzner Robot** (bare-metal)
+API.
 
-Hetzner publishes official clients for the Cloud API but none for the Robot
-API in Rust. `metalctl` fills that gap with a small, dependency-light crate and
-a thin command-line interface.
+## Prior art and scope (read this first)
+
+**[`hrobot-rs`](https://github.com/MathiasPius/hrobot-rs)** (`hrobot` on
+crates.io, MIT) is a mature, **async** Robot client that covers **more** of the
+API than `metalctl` does. If you want a full-featured Robot client, use `hrobot`.
+
+`metalctl` does not aim to replace it or reach API parity. It deliberately
+occupies a smaller niche:
+
+- **synchronous**, no async runtime;
+- **minimal dependencies** (`ureq` + `serde` + `thiserror` + `clap`);
+- **CLI-first** — it ships the `metalctl` binary, which `hrobot` does not;
+- **offline, deterministic tests** via an in-memory transport.
+
+We are upfront that the endpoint modules overlap with `hrobot`. The reason for
+building it is the CLI and the sync/minimal-deps posture, not coverage. See
+[BACKLOG.md](BACKLOG.md) for where the effort goes next.
 
 ## Status
 
