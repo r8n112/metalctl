@@ -35,6 +35,11 @@ enum Command {
         #[command(subcommand)]
         command: ResetCommand,
     },
+    /// Manage boot configuration (rescue system).
+    Boot {
+        #[command(subcommand)]
+        command: BootCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -99,6 +104,43 @@ impl From<ResetKind> for api::reset::ResetType {
             ResetKind::Power => Self::Power,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+enum BootCommand {
+    /// Manage the rescue system.
+    Rescue {
+        #[command(subcommand)]
+        command: RescueCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RescueCommand {
+    /// Show the current rescue system configuration.
+    Get {
+        /// Server number.
+        number: u32,
+    },
+    /// Activate the rescue system.
+    Activate {
+        /// Server number.
+        number: u32,
+        /// Operating system.
+        #[arg(long, default_value = "linux")]
+        os: String,
+        /// Architecture (32 or 64).
+        #[arg(long, default_value = "64")]
+        arch: String,
+        /// Authorised SSH key (may be repeated).
+        #[arg(long = "key")]
+        authorized_keys: Vec<String>,
+    },
+    /// Deactivate the rescue system.
+    Deactivate {
+        /// Server number.
+        number: u32,
+    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -171,6 +213,36 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         },
+        Command::Boot { command } => match command {
+            BootCommand::Rescue { command } => match command {
+                RescueCommand::Get { number } => {
+                    let rescue = api::boot::rescue(&client, *number)?;
+                    if cli.json {
+                        print_json(&rescue)?;
+                    } else {
+                        print_rescue(&rescue);
+                    }
+                }
+                RescueCommand::Activate {
+                    number,
+                    os,
+                    arch,
+                    authorized_keys,
+                } => {
+                    let rescue =
+                        api::boot::activate_rescue(&client, *number, os, arch, authorized_keys)?;
+                    if cli.json {
+                        print_json(&rescue)?;
+                    } else {
+                        print_rescue(&rescue);
+                    }
+                }
+                RescueCommand::Deactivate { number } => {
+                    api::boot::deactivate_rescue(&client, *number)?;
+                    println!("rescue system deactivated for server {number}");
+                }
+            },
+        },
     }
     Ok(())
 }
@@ -203,6 +275,22 @@ fn print_server(server: &api::server::Server) {
     }
     if let Some(dc) = &server.dc {
         println!("dc:      {dc}");
+    }
+}
+
+fn print_rescue(rescue: &api::boot::Rescue) {
+    println!("server:   {}", rescue.server_number);
+    if let Some(os) = &rescue.os {
+        println!("os:       {os}");
+    }
+    if let Some(arch) = rescue.arch {
+        println!("arch:     {arch}");
+    }
+    if let Some(active) = rescue.active {
+        println!("active:   {active}");
+    }
+    if let Some(password) = &rescue.password {
+        println!("password: {password}");
     }
 }
 

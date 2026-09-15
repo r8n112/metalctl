@@ -64,6 +64,7 @@ impl Transport for UreqTransport {
         let prepared = match request.method.as_str() {
             "GET" => self.agent.get(&request.url),
             "POST" => self.agent.post(&request.url),
+            "DELETE" => self.agent.delete(&request.url),
             other => {
                 return Err(Error::Transport(format!("unsupported method: {other}")));
             }

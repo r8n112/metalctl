@@ -199,3 +199,62 @@ fn executes_a_reset() {
     assert_eq!(request.url, "https://robot.example/reset/321");
     assert_eq!(request.body.as_deref(), Some("type=hw"));
 }
+
+#[test]
+fn gets_rescue_configuration() {
+    let body =
+        r#"{"rescue":{"server_number":321,"os":"linux","arch":64,"active":true,"password":"pw"}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let rescue = api::boot::rescue(&client, 321).unwrap();
+    assert_eq!(rescue.os.as_deref(), Some("linux"));
+    assert_eq!(rescue.arch, Some(64));
+    assert_eq!(rescue.active, Some(true));
+    assert_eq!(
+        transport.requests()[0].0.url,
+        "https://robot.example/boot/321/rescue"
+    );
+}
+
+#[test]
+fn activates_rescue_with_authorized_keys() {
+    let body = r#"{"rescue":{"server_number":321,"os":"linux","arch":64,"active":true}}"#;
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: body.to_owned(),
+    }]);
+
+    let rescue = api::boot::activate_rescue(
+        &client,
+        321,
+        "linux",
+        "64",
+        &["ssh-ed25519 AAAA".to_owned()],
+    )
+    .unwrap();
+    assert_eq!(rescue.active, Some(true));
+
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.url, "https://robot.example/boot/321/rescue");
+    assert_eq!(
+        request.body.as_deref(),
+        Some("os=linux&arch=64&authorized_key=ssh-ed25519+AAAA")
+    );
+}
+
+#[test]
+fn deactivates_rescue() {
+    let (client, transport) = client_with(vec![HttpResponse {
+        status: 200,
+        body: r#"{"rescue":{"server_number":321}}"#.to_owned(),
+    }]);
+
+    api::boot::deactivate_rescue(&client, 321).unwrap();
+    let request = &transport.requests()[0].0;
+    assert_eq!(request.method, "DELETE");
+    assert_eq!(request.url, "https://robot.example/boot/321/rescue");
+}

@@ -9,8 +9,9 @@ a thin command-line interface.
 ## Status
 
 Early (`0.1.0`). Implemented: HTTP transport abstraction, credentials, error
-taxonomy, `server list`/`get`, `rdns get`/`set`, and `reset methods`/`run`. More
-Robot endpoints (boot, failover, vSwitch, traffic) follow.
+taxonomy, `server list`/`get`, `rdns get`/`set`, `reset methods`/`run`, and
+`boot rescue get`/`activate`/`deactivate`. More Robot endpoints (failover,
+vSwitch, traffic) follow.
 
 ## Design
 

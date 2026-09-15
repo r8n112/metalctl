@@ -75,6 +75,17 @@ impl<T: Transport> RobotClient<T> {
         deserialize(&response.body)
     }
 
+    /// Performs a `DELETE` request and discards the response body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Api`] for a non-success status or [`Error::Transport`]
+    /// if the request fails.
+    pub fn delete(&self, path: &str) -> Result<()> {
+        self.send("DELETE", path, None)?;
+        Ok(())
+    }
+
     fn send(&self, method: &str, path: &str, body: Option<String>) -> Result<HttpResponse> {
         let url = format!("{}/{}", self.base_url, path.trim_start_matches('/'));
         let request = HttpRequest {
