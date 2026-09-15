@@ -6,7 +6,10 @@ resolver = "2"
 name = "metalctl"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.74"
+# Workspace MSRV: the `metalctl-mcp` member depends on `rmcp`, which requires
+# Rust 1.88. Declaring it here too keeps the repo's floor honest instead of
+# claiming a lower version the workspace as a whole cannot build on.
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 description = "Low-level CLI and library for the Hetzner Robot (bare-metal) API"
 repository = "https://github.com/r8n112/metalctl"
