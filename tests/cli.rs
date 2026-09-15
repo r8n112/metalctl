@@ -16,6 +16,7 @@ struct Recorded {
     method: String,
     path: String,
     body: String,
+    authorization: Option<String>,
 }
 
 struct Stub {
@@ -61,6 +62,7 @@ fn handle_connection(stream: &TcpStream, recorded: &Arc<Mutex<Vec<Recorded>>>) {
     let path = parts.next().unwrap_or_default().to_string();
 
     let mut content_length = 0_usize;
+    let mut authorization = None;
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line).unwrap_or(0) == 0 {
@@ -71,8 +73,10 @@ fn handle_connection(stream: &TcpStream, recorded: &Arc<Mutex<Vec<Recorded>>>) {
             break;
         }
         if let Some((key, value)) = trimmed.split_once(':') {
-            if key.trim().eq_ignore_ascii_case("content-length") {
-                content_length = value.trim().parse().unwrap_or(0);
+            match key.trim().to_ascii_lowercase().as_str() {
+                "content-length" => content_length = value.trim().parse().unwrap_or(0),
+                "authorization" => authorization = Some(value.trim().to_string()),
+                _ => {}
             }
         }
     }
@@ -88,6 +92,7 @@ fn handle_connection(stream: &TcpStream, recorded: &Arc<Mutex<Vec<Recorded>>>) {
         method,
         path: path.clone(),
         body,
+        authorization,
     });
 
     let response_body = if path.ends_with("/server") {
@@ -211,4 +216,39 @@ fn missing_credentials_fail_without_a_request() {
     assert!(!output.status.success());
     assert!(stub.requests().is_empty());
     assert!(stderr(&output).contains("missing credentials"));
+}
+
+#[test]
+fn flags_supply_credentials_without_the_environment() {
+    use std::io::Write as _;
+
+    let password_path =
+        std::env::temp_dir().join(format!("metalctl-e2e-pass-{}", std::process::id()));
+    let mut file = std::fs::File::create(&password_path).expect("create password file");
+    writeln!(file, "pass").expect("write password file");
+    drop(file);
+
+    let stub = Stub::start();
+    let output = run_cli(
+        &stub,
+        false,
+        &[
+            "--user",
+            "user",
+            "--password-file",
+            password_path.to_str().expect("utf-8 path"),
+            "--json",
+            "server",
+            "list",
+        ],
+    );
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let requests = stub.requests();
+    // base64("user:pass") == "dXNlcjpwYXNz"
+    assert_eq!(
+        requests[0].authorization.as_deref(),
+        Some("Basic dXNlcjpwYXNz")
+    );
+    let _ = std::fs::remove_file(&password_path);
 }

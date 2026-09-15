@@ -26,6 +26,9 @@ mod error;
 mod transport;
 
 pub use client::{RetryPolicy, RobotClient, DEFAULT_BASE_URL};
-pub use credentials::Credentials;
+pub use credentials::{
+    default_config_path, load_config, ConfigCredentials, CredentialSources, Credentials,
+    PASSWORD_ENV, USER_ENV,
+};
 pub use error::{Error, Result};
 pub use transport::{HttpRequest, HttpResponse, Transport, UreqTransport, DEFAULT_TIMEOUT};

@@ -6,8 +6,11 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// Required credentials were not present in the environment.
-    #[error("missing credentials: set HETZNER_ROBOT_USER and HETZNER_ROBOT_PASSWORD")]
+    /// No credentials were found in any source.
+    #[error(
+        "missing credentials: provide a username/password via HETZNER_ROBOT_USER and \
+         HETZNER_ROBOT_PASSWORD, CLI options, or a config file"
+    )]
     MissingCredentials,
 
     /// Credentials were provided but are empty.
@@ -47,6 +50,10 @@ pub enum Error {
         /// Human-readable description of the refused operation.
         action: String,
     },
+
+    /// A configuration file could not be read, parsed, or is insecure.
+    #[error("configuration error: {0}")]
+    Config(String),
 }
 
 /// Convenience result alias used throughout the crate.

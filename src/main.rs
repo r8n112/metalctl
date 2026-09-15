@@ -1,9 +1,13 @@
 //! `metalctl` command-line interface.
 
 use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use metalctl::{api, Credentials, Error, Result, RobotClient, UreqTransport};
+use metalctl::{
+    api, default_config_path, load_config, CredentialSources, Credentials, Error, Result,
+    RobotClient, UreqTransport, PASSWORD_ENV, USER_ENV,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -23,6 +27,14 @@ struct Cli {
     /// Skip the interactive confirmation prompt for destructive commands.
     #[arg(long, global = true)]
     yes: bool,
+
+    /// Robot webservice user (overrides the environment and config file).
+    #[arg(long, global = true)]
+    user: Option<String>,
+
+    /// Read the Robot webservice password from this file.
+    #[arg(long, global = true, value_name = "PATH")]
+    password_file: Option<PathBuf>,
 
     /// Override the API base URL. Testing hook, not a supported user feature.
     #[arg(long, global = true, hide = true, value_name = "URL")]
@@ -290,7 +302,7 @@ fn run(cli: &Cli) -> Result<()> {
         // credentials. The client is never used because `approve` stops first.
         Credentials::new("dry-run", "dry-run")?
     } else {
-        Credentials::from_env()?
+        resolve_credentials(cli)?
     };
     let client = match &cli.base_url {
         Some(base_url) => {
@@ -299,6 +311,47 @@ fn run(cli: &Cli) -> Result<()> {
         None => RobotClient::new(credentials),
     };
     dispatch(&client, cli)
+}
+
+/// Resolves credentials with precedence flags → environment → config file.
+fn resolve_credentials(cli: &Cli) -> Result<Credentials> {
+    let flag_password = match &cli.password_file {
+        Some(path) => Some(read_secret_file(path)?),
+        None => None,
+    };
+    let env_user = std::env::var(USER_ENV).ok();
+    let env_password = std::env::var(PASSWORD_ENV).ok();
+
+    // Only touch the config file when a value is still missing, so a broken or
+    // insecure config cannot affect a run that does not need it.
+    let need_config = (cli.user.is_none() && env_user.is_none())
+        || (flag_password.is_none() && env_password.is_none());
+    let config = if need_config {
+        match default_config_path() {
+            Some(path) => load_config(&path)?,
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    Credentials::resolve(CredentialSources {
+        flag_user: cli.user.clone(),
+        flag_password,
+        env_user,
+        env_password,
+        config,
+    })
+}
+
+fn read_secret_file(path: &Path) -> Result<String> {
+    let contents = std::fs::read_to_string(path).map_err(|error| {
+        Error::Config(format!(
+            "failed to read password file {}: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(contents.trim().to_string())
 }
 
 /// Outcome of the destructive-operation confirmation check.
